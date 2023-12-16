@@ -1,25 +1,37 @@
 """ Работа с пользователем и механика игры"""
-import datetime
+import datetime as dt
 import logging
+import string
 
 import pytz
-#import re
+import re
 import random
 
 import db
 import exceptions
+from states import states
 
 CONST_SPY = 'шпион'
-WINNER_TYPE_SPY = 1   # spy wasn't uncovered
-WINNER_TYPE_SPY_GL = 2   # spy wasn't uncovered and he guested location
-WINNER_TYPE_SPY_WS = 3   # spy wasn't uncovered and people chose wrong spy
-WINNER_TYPE_PLP_NO = 4   # spy was uncovered by himself choosing wrong location
-WINNER_TYPE_PLP_YES = 5   # spy was uncovered by a player
+DEFAULT_SET = 'Основной'
+commands = {'new', 'join', 'quit', 'close', 'round', 'finish', 'loc', 'game', 'stat'}
+winner_type_spy = {'spy_1', 'spy_2', 'spy_3'}
+winner_type = winner_type_spy.union({'not_spy', 'pl_id', 'nobody'})
+WINNER_TYPE_SPY = 1  # spy wasn't uncovered
+WINNER_TYPE_SPY_GL = 2  # spy wasn't uncovered and he guested location
+WINNER_TYPE_SPY_WS = 3  # spy wasn't uncovered and people chose wrong spy
+WINNER_TYPE_PLP_NO = 4  # spy was uncovered by himself choosing wrong location
+WINNER_TYPE_PLP_YES = 5  # spy was uncovered by a player
+
+logging.basicConfig(level=logging.INFO)
+#games = {}
+#pls = {}
+
 
 def _is_spy_win(winner_type: int) -> bool:
     return winner_type < 4
 
-def _win_score(winner_type: int, is_spy: bool, winner = False) -> int:
+
+def _win_score(winner_type: int, is_spy: bool, winner=False) -> int:
     if is_spy:
         if WINNER_TYPE_SPY == winner_type:
             score = 2
@@ -38,16 +50,13 @@ def _win_score(winner_type: int, is_spy: bool, winner = False) -> int:
             score = 1
     return score
 
-DEFAULT_SET = 'Основной'
-
-games = {}
-pls = {}
 
 class Location():
     """Структура локации"""
-    def __init__(self, id:int):
+
+    def __init__(self, id: int):
         """Создаем из БД инфо по локации """
-        l = db.fetchone("location", "id location roles pic".split(), id)
+        l = db.fetchone('location', 'id location roles pic'.split(), id)
         self.id = l['id']
         self.name = l['location']
         self.roles = l['roles'].split(',')
@@ -58,7 +67,8 @@ class Location():
 
 class Round():
     """Структура раунда игры"""
-#    game: Game
+
+    #    game: Game
     def __init__(self, game: str, round_nbr: int, location: Location, spy: int):
         self.round_nbr = round_nbr
         self.game_name = game
@@ -66,7 +76,9 @@ class Round():
         self.location = location
         self.spy = spy
         self.roles = {}
-        self.finished = None
+        self.dur_min = 7
+        self.finish = self.started + dt.timedelta(minutes=self.dur_min)
+        self.in_progress = 1
         self.winner_type = 0
         self.winner = 0
 
@@ -76,51 +88,67 @@ class Round():
 
 class Game():
     """Структура игры"""
+    _games = {}
 
-    def __init__(self, name: str, owner: int, set_name: str):
+    @classmethod
+    def find(cls, game_name: str):
+        if not game_name or game_name not in cls._games.keys():
+            return None
+        return cls._games[game_name]
+
+    @staticmethod
+    def suggest_name(game_name='', n=6) -> str:
+        suggested_name = game_name + ''.join(random.choices(string.ascii_uppercase + string.digits, k=n))
+        return suggested_name
+
+    def __init__(self, name: str, admin, set_name=None):
         """Create new game"""
         self.name = name
-        self.owner = owner
-        self.players = {owner: 0}
-        self.set_name = set_name
-        l = db.fetchuniq("location", ["id"], "set_name", set_name)
+        self.players = {admin.id: admin}
+        self.scores = {admin.id: 0}
+        self.set_name = set_name if set_name else DEFAULT_SET
+        l = db.fetchuniq('location', ['id'], 'set_name', set_name)
         self.loc_list = [item['id'] for item in l]
         random.shuffle(self.loc_list)
         self.round_nbr = 0
         self.round = None
-        games[name] = self
+        self._games[name] = self
 
     def __del__(self):
-        print(f"Game {self.name} deleted")
+        n = len(Game._games)
+        logging.info(f'Game {self.name} deleted. Keep in memory {n} games')
 
-    def join(self, pl_id: int):
+    def join(self, pl):
         """Join to the game player with id"""
-        self.players[pl_id] = 0
+        self.players[pl.id] = pl
+        if pl.id not in self.scores.keys():
+            self.scores[pl.id] = 0
 
-    def quit(self, pl_id: int):
+    def quit(self, pl):
         """Quit from the game for player with id"""
-        del self.players[pl_id]
-        del pls[pl_id]
+        del self.players[pl]
+        del Player._pls[pl]
 
     def close(self):
         """Close game for all players in it"""
         for id in self.players.keys():
-            del pls[id]
+            del Player._pls[id]
 
-        del games[self.name]
+        del self._games[self.name]
 
     def start_round(self):
-        """Quit from the game for player with id"""
+        """Start new round"""
         self.round_nbr += 1
-        loc_id = self.loc_list[self.round_nbr-1]
+        loc_id = self.loc_list[self.round_nbr - 1]
         loc = Location(loc_id)
         spy = random.choice(list(self.players.keys()))
         self.round = Round(self.name, self.round_nbr, loc, spy)
-        start_str = self.round.started.strftime("%Y-%m-%d %H:%M:%S")
-        logging.info(f"Starting new round at {start_str}, location {loc.name}, spy is {pls[spy].full_name}")
+        start_str = self.round.started.strftime('%Y-%m-%d %H:%M:%S')
+        spy_name = self.players[spy].full_name
+        logging.info(f'Starting new round at {start_str}, location {loc.name}, spy is {spy_name}')
         role_index = 0
         for pl in self.players.keys():
-            pl_name = pls[pl].full_name
+            pl_name = self.players[pl].full_name
             if pl == spy:
                 role = CONST_SPY
             else:
@@ -128,140 +156,159 @@ class Game():
                 role = loc.roles[role_index]
                 role_index += 1
             self.round.roles[pl] = role
-#            print(f"{pl} ({pl_name}): You are {role} in {loc.name}")
 
+            logging.info(f'{pl} ({pl_name}): role is {role}')
+        return self.round
 
-    def finish_round(self, winner_type: int, winner = 0):
+    def finish_round(self, winner_type: int, winner=0) -> list:
         """Round is finished"""
-        print("Finishing round")
+        logging.info(f'Finishing round with winner_type = {winner_type} and winner = {winner}')
         self.round.finished = _get_now_datetime()
+        self.round.in_progress = 0
         self.round.winner_type = winner_type
         self.round.winner = winner
         spy = self.round.spy
+        results = []
         for pl in self.players.keys():
-            pl_name = pls[pl].full_name
+            pl_name = self.players[pl].full_name
             score = _win_score(winner_type, pl == spy, pl == winner)
-            self.players[pl] += score
-            logging.info(f"{pl} ({pl_name}): You get {score} scores in round {self.round_nbr}. Total: {self.players[pl]}")
+            self.scores[pl] += score
+            results.append((self.players[pl].full_name, score, self.scores[pl]))
+            logging.info(
+                f'{pl} ({pl_name}): get {score} scores in round {self.round_nbr}. Total: {self.scores[pl]}')
+        return results
 
-    def get_info(self) -> str:
+    def get_info(self) -> list:
         """Get info about game: players with scores, current round"""
-        pl_nbr = len(self.players)
-        msg = f'Игра {self.name}, раунд {self.round_nbr}, игроков {pl_nbr}, очки:\n'
-        spls = {k: v for k, v in sorted(self.players.items(), key=lambda item: item[1], reverse=True)}
+        spls = {k: v for k, v in sorted(self.scores.items(), key=lambda item: item[1], reverse=True)}
 
-        for (k, v) in spls.items():
-            msg += f'{pls[k].full_name}: {v}\n'
+        result = list((self.players[k].full_name, v) for (k, v) in spls.items())
+        return result
 
-        return msg
 
-    def get_locations(self) -> str:
+    def get_locations(self) -> list:
         """Get all locations in a game"""
-        l = db.fetchuniq("location", ["location"], "set_name", self.set_name)
+        l = db.fetchuniq('location', ['location'], 'set_name', self.set_name)
         loc_list = [item['location'] for item in l]
         loc_list.sort()
-        return ", ".join(loc_list)
+        return loc_list
 
 
 class Player():
     """Структура игрока"""
+    _pls = {}
 
-    def __init__(self, tg_id: int, full_name: str, lang = "RU"):
-        self.tg_id = tg_id
-        self.full_name = full_name
-        self.lang = lang
+    @classmethod
+    def auth(cls, user):
+        if user.id in cls._pls.keys():
+            return cls._pls[user.id]
+        else:
+            return cls(user)
+
+    def __init__(self, user):
+        (self.id, self.full_name, self.language_code) = user if isinstance(user, tuple) \
+            else (user.id, user.full_name, user.language_code)
+        self.state = 'init'
         self.game = None
-        self.is_owner = False
-        pls[tg_id] = self
+        self.is_admin = False
+        self._pls[self.id] = self
 
-    def create_game(self, game_name: str, set_name = DEFAULT_SET) -> Game:
-        self.game = Game(game_name, self.tg_id, set_name)
-        self.is_owner = True
+    def create_game(self, game_name: str, set_name=DEFAULT_SET) -> Game:
+        self.game = Game(game_name, self, set_name)
+        self.is_admin = True
+        self.state = 'admin_game_created_round_no'
         return self.game
 
-    def join_game(self, game_name: str) -> str:
-        if game_name in games:
-            self.game = games[game_name]
-            self.game.join(self.tg_id)
-            msg = "Вы присоединились к игре: " + game_name
-        else:
-            msg = "Не найду игры: "+game_name
-        return msg
+    def join_game(self, game_name: str) -> int:
+        if not game_name:
+            self.state = 'joining_game_need_name'
+            return 1
 
-    def quit(self):
+        game = Game.find(game_name)
+        if not game:
+            logging.warning(f'Can\'t find game {game_name}')
+            return 1
+
+        self.game = game
+        self.is_admin = False
+        self.game.join(self)
+        self.state = 'joined_game'
+        logging.info(f'{self.full_name} joined the game {game_name}')
+        return 0
+
+    def quit_game(self):
         """Quit from the game for a player"""
         if self.game is None:
-            print("You are not in any game yet")
-            return 0
+            logging.warning('{self.id} {self.full_name} trying to quit from a game, when it\'s None')
+            return 1
 
-        if self.is_owner:
+        if self.is_admin:
             self.game.close()
         else:
-            self.game.quit(self.tg_id)
+            self.game.quit(self.id)
+        return 0
+
+    def check_command(self, comm: str, arg=None):
+        if comm in ['new', 'create', 'join']:
+            if self.game is not None:
+                return 'IN_GAME'
+            g = Game.find(arg)
+            if comm == 'join' and g is None:
+                return 'GAME_NOT_FOUND'
+            elif comm in ['new', 'create'] and g is not None:
+                return 'GAME_EXIST'
+            else:
+                return ''
+        elif comm in ['loc', 'game', 'quit']:
+            return 'NO_GAME' if self.game is None else ''
+        elif comm in ['round', 'finish']:
+            if self.game is None:
+                return 'NO_GAME'
+            if not self.is_admin:
+                return 'NOT_ADMIN'
+            return ''
+
+    def check_state(self, cmd: str):
+        state = states[self.state]
+        if cmd not in state['cmd']:
+            return "You can't do this"
+        else:
+            return ''
 
 
-    def start_round(self):
-        """Start new round"""
-        if self.game is None or self.is_owner == 0:
-            print("Create a game first")
-            return
-        self.game.start_round()
-
-
-    def finish_round(self, winner_type: int, winner = 0):
-        """Round is finished"""
-        if self.game is None or self.is_owner == 0:
-            print("Create a game first")
-            return
-        self.game.finish_round(winner_type, winner)
-
-    def get_game_info(self):
-        """Send to player info about game"""
-        if self.game is None:
-            print("Create a game first")
-            return
-        return self.game.get_info()
-
-    def get_game_locations(self):
-        """Send to player info about available locations in the game"""
-        if self.game is None:
-            print("Create a game first")
-            return
-        return self.game.get_locations()
 
 def _get_now_formatted() -> str:
     """Возвращает сегодняшнюю дату строкой"""
-    return _get_now_datetime().strftime("%Y-%m-%d %H:%M:%S")
+    return _get_now_datetime().strftime('%Y-%m-%d %H:%M:%S')
 
 
-def _get_now_datetime() -> datetime.datetime:
+def _get_now_datetime() -> dt.datetime:
     """Возвращает сегодняшний datetime с учётом времненной зоны Мск."""
-    tz = pytz.timezone("Europe/Moscow")
-    now = datetime.datetime.now(tz)
+    tz = pytz.timezone('Europe/Moscow')
+    now = dt.datetime.now(tz)
     return now
 
+
 def test():
-    pl1 = Player(1, "Oleg")
-    pl2 = Player(2, "Ira")
-    pl3 = Player(3, "Borya")
-    pl4 = Player(4, "Katya")
-    pl1.create_game("test")
-    pl2.join_game("test")
-    pl3.join_game("test")
-    pl4.join_game("test")
+    names = ['Viktor', 'Ira', 'Ivan', 'Kirill']
+    admin = None
+    for i in range(1, 5):
+        pl = Player((i, names[i-1], 'ru'))
+        if 1 == i:
+            pl.create_game('test')
+            admin = pl
+        else:
+            pl.join_game('test')
 
-    pl1.start_round()
-    pl1.finish_round(WINNER_TYPE_SPY_GL)
-    pl1.start_round()
-    pl1.finish_round(WINNER_TYPE_SPY)
-    pl1.start_round()
-    pl1.finish_round(WINNER_TYPE_PLP_NO)
-    pl1.start_round()
-    pl1.finish_round(WINNER_TYPE_PLP_YES, 2)
+    print(admin.game.get_locations())
 
-#    msg = pl1.get_game_info()
-    msg = pl2.get_game_locations()
-    print(msg)
+    for i in range(1, 6):
+        admin.game.start_round()
+        admin.game.finish_round(i)
 
-#test()
+    print(admin.game.get_info())
+
+
+
+test()
 

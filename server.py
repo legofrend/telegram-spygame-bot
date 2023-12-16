@@ -1,12 +1,21 @@
 """Сервер Telegram бота, запускаемый непосредственно"""
 import logging
-import os, re
+import os, re, copy
 import asyncio
 import random
-
-from games import pls, games, Player
-
 from aiogram import Bot, Dispatcher, executor, types
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.contrib.middlewares.logging import LoggingMiddleware
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters.state import State, StatesGroup
+
+from games import Player, Game
+from msg import error_msg, MSG
+import keyboards as kb
+
+class FSMUser(StatesGroup):
+    wait_name = State()
+    wait_winner = State()
 
 logging.basicConfig(level=logging.INFO)
 # logging.basicConfig(level=logging.INFO, filename='bot.log', format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -18,138 +27,227 @@ PROXY_AUTH = None
     login=os.getenv("TELEGRAM_PROXY_LOGIN"),
     password=os.getenv("TELEGRAM_PROXY_PASSWORD")
 )"""
+LNG = 'ru'
 
 bot = Bot(token=API_TOKEN, proxy=PROXY_URL, proxy_auth=PROXY_AUTH)
-dp = Dispatcher(bot)
-
+dp = Dispatcher(bot, storage=MemoryStorage())
+dp.middleware.setup(LoggingMiddleware())
 
 @dp.message_handler(commands=['start', 'help'])
 async def send_welcome(message: types.Message):
     """Отправляет приветственное сообщение и помощь по боту"""
-    await message.answer(
-        "Бот для игры в Находку для шпиона\n\n"
-        "/new [Name] создать новую игру\n"
-        "/join [Name] присоединиться к игре\n"
-        "/round - запустить новый раунд\n"
-        "/loc - вывести список локаций игры\n"
-        "/game - вывести информацию о текущей игре и участниках\n"
-    )
+    await message.answer(MSG[LNG]['msg_greeting'], reply_markup=kb.kbs[LNG]['kb_init'])
 
-@dp.message_handler(lambda message: message.text.startswith('/new'))
+
+@dp.message_handler(commands=['new'])
 async def new_game(message: types.Message):
     """Создает новую игру с названием Game"""
-    regexp_result = re.match(r"/[^ ]+ (.*)", message.text)
-    game_name = regexp_result[1]
+    cmnd = message.get_command(True)
+    args = message.get_args().split()
+    game_name = args[0] if len(args) > 0 else Game.suggest_name()
+    pl = Player.auth(message.from_user)
 
-    pl_id = message.from_user.id
-    if pl_id not in pls.keys():
-        npl = Player(pl_id, message.from_user.full_name, message.from_user.language_code)
+    if error_message := error_msg(pl.check_command(cmnd, game_name)):
+        await message.answer(error_message)
+        return
+
+    if pl.create_game(game_name):
+        answer_message = f"Cоздал игру: {game_name}"
+        if True:
+            test_add_users(game_name)
     else:
-        npl = pls[pl_id]
-    if npl.game is not None:
-        answer_message = "Вы уже в игре" + npl.game.name
-    else:
-        if npl.create_game(game_name):
-            answer_message = "Cоздали игру: " + game_name
-            if True:
-                pl1 = Player(1, "Oleg")
-                pl2 = Player(2, "Ira")
-                pl3 = Player(3, "Borya")
-                pl4 = Player(4, "Katya")
-                pl1.join_game(game_name)
-                pl2.join_game(game_name)
-                pl3.join_game(game_name)
-                pl4.join_game(game_name)
+        answer_message = f"Ой, не смог создать игру {game_name}. Спрошу у хозяина"
 
-    await message.answer(answer_message)
+    await message.answer(answer_message, reply_markup=kb.kbs[LNG]['kb_admin'])
 
 
-@dp.message_handler(lambda message: message.text.startswith('/join'))
-async def join_game(message: types.Message):
+@dp.message_handler(state=FSMUser.wait_name)
+async def process_name(message: types.Message, state: FSMContext):
+    logging.info(f'State is {state}')
+    pl = Player.auth(message.from_user)
+    async with state.proxy() as data:
+        cmd = data['cmd']
+        if cmd == 'join':
+            pl.join_game(message.text)
+
+@dp.message_handler(commands=['join'], state=None)
+async def join_game(message: types.Message, state: FSMContext):
     """Присоединиться к созданной игре с названием Game"""
-    regexp_result = re.match(r"/[^ ]+ (.*)", message.text)
+    game_name = message.get_args()
+    if not game_name:
+        answer_message = "Укажите название игры, в которую хотите присоединиться"
+        async with state.proxy() as data:
+            data['cmd'] = 'join'
+        await FSMUser.wait_name.set()
+        await message.answer(answer_message)
+        return
 
-    game_name = regexp_result[1]
-    pl_id = message.from_user.id
-    if pl_id in pls.keys() and pls[pl_id].game is not None:
-        answer_message = "Вы еще в игре " + pls[pl_id].game.name
+
+    pl = Player.auth(message.from_user)
+    if error_message := error_msg(pl.check_command("join", game_name)):
+        await message.answer(error_message)
+        return
+
+    if pl.join_game(game_name):
+        answer_message = f"Не могу присоединить к игре {pl.game.name}, спрошу у менеджера"
+        await message.answer(answer_message)
+        return
+
+    answer_message = f"Вы присоединились к игре {game_name}, дождитесь старта раунда. \
+        Посмотреть кто в игре можно командой \game"
+    await message.answer(answer_message, reply_markup=kb.kbs[LNG]['kb_player'])
+
+@dp.message_handler(state=FSMUser.wait_name)
+async def process_name(message: types.Message, state: FSMContext):
+    """User write command without argument. Waiting them"""
+    logging.info(f'State is {state}')
+    pl = Player.auth(message.from_user)
+    async with state.proxy() as data:
+        cmd = data['cmd']
+        if cmd == 'join':
+            pl.join_game(message.text)
+    await state.finish()
+
+@dp.message_handler(commands=['quit'])
+async def quit_game(message: types.Message):
+    """Выйти из игры"""
+    pl = Player.auth(message.from_user)
+    if not pl.quit_game():
+        answer_message = f"Вы вышли из игры"
     else:
-        npl = Player(pl_id, message.from_user.full_name, message.from_user.language_code)
-        npl.join_game(game_name)
-        answer_message = "Вы присоединились к игре " + game_name + ", дождитесь старта раунда"
-
-
+        answer_message = f"Вы не были в игре"
     await message.answer(answer_message)
 
 
-@dp.message_handler(lambda message: message.text.startswith('/round'))
-async def new_round(message: types.Message):
+@dp.message_handler(commands=['round'])
+async def start_round(message: types.Message):
     """Запускает новый раунд"""
-    pl_id = message.from_user.id
-    if pl_id in pls.keys() and pls[pl_id].game is not None:
-        pls[pl_id].start_round()
-        r = pls[pl_id].game.round
+    pl = Player.auth(message.from_user)
+    if error_message := error_msg(pl.check_command("round")):
+        await message.answer(error_message)
+        return
 
-        for pl, role in r.roles.items():
-            loc_name = "???" if r.spy == pl else r.location.name
-            answer_message = f"Локация: {loc_name}\nРоль: {role}"
-            pl_name = pls[pl].full_name
-            logging.info(f"{pl} ({pl_name}): {answer_message}")
-            if pl > 100:
-                await bot.send_message(pl, answer_message)
-    else:
-        answer_message = "Вы еще не создали игру"
-        await message.answer(answer_message)
+    r = pl.game.start_round()
+    start_str = r.started.strftime("%H:%M:%S")
+    finish_str = r.finish.strftime("%H:%M:%S")
+    msg = f"Раунд {r.round_nbr}: {start_str} - {finish_str}\n"
 
+    """send to all players their private info about location and role"""
+    for pl_id, role in r.roles.items():
+        loc_name = "???" if r.spy == pl_id else r.location.name
+        answer_message = msg + f"Место: {loc_name}\nВы: {role}"
+        if pl_id > 100:
+            await bot.send_message(pl_id, answer_message)
+            logging.info(f"{pl_id}: {answer_message}")
 
-@dp.message_handler(lambda message: message.text.startswith('/finish'))
+    await asyncio.sleep(3)
+    await message.answer("Кто победил?", reply_markup=kb.pl2kb(pl.game.players, LNG))
+
+@dp.message_handler(commands=['finish'])
 async def finish_round(message: types.Message):
     """Выбран победитель раунда"""
-    pl_id = message.from_user.id
-    winner_type = int(random.random()*5)
-    winner_str = "шпион" if winner_type < 4 else "антишпион"
-    if pl_id in pls.keys() and pls[pl_id].game is not None:
-        pls[pl_id].finish_round(winner_type)
-        answer_message = f"Раунд закончен, победил {winner_str}"
-    else:
-        answer_message = "Вы еще не создали игру"
+    pl = Player.auth(message.from_user)
+    if error_message := error_msg(pl.check_command("finish")):
+        await message.answer(error_message)
+        return
+
+    winner_type = int(random.random()*5)+1
+    winner_str = "шпион" if 0 < winner_type < 4 else "антишпион"
+    results = pl.game.finish_round(winner_type)
+    answer_message = f"Раунд закончен, победил {winner_str}\n"
+    for (name, sc, tsc) in results:
+        answer_message += f"{name}: {sc} ({tsc})\n"
 
     await message.answer(answer_message)
 
 
-@dp.message_handler(lambda message: message.text.startswith('/loc'))
-async def list_locations(message: types.Message):
+@dp.message_handler(commands=['loc'])
+async def list_loc(message: types.Message):
     """Выводит список локаций"""
-    pl_id = message.from_user.id
-    if pl_id in pls.keys() and pls[pl_id].game is not None:
-        answer_message = pls[pl_id].get_game_locations()
-    else:
-        answer_message = "Вы еще не в игре"
+    pl = Player.auth(message.from_user)
+    if error_message := error_msg(pl.check_command("loc")):
+        await message.answer(error_message)
+        return
+
+    answer_message = ", ".join(pl.game.get_locations())
     await message.answer(answer_message)
 
 
-@dp.message_handler(lambda message: message.text.startswith('/game'))
-async def game_stat(message: types.Message):
+@dp.message_handler(commands=['game'])
+async def game_info(message: types.Message):
     """Информация о текущей игре"""
-    pl_id = message.from_user.id
-    if pl_id in pls.keys() and pls[pl_id].game is not None:
-        answer_message = pls[pl_id].get_game_info()
-    else:
-        answer_message = "Вы еще не в игре"
+    pl = Player.auth(message.from_user)
+    if error_message := error_msg(pl.check_command("game")):
+        await message.answer(error_message)
+        return
+
+    g = pl.game
+    pl_nbr = len(g.players)
+    info = g.get_info()
+    answer_message = f'Игра {g.name}, раунд {g.round_nbr}, игроков {pl_nbr}, очки:\n'
+    for (name, score) in info:
+        answer_message += f"{name}: {score}\n"
+
     await message.answer(answer_message)
 
 
-@dp.message_handler(lambda message: message.text.startswith('test'))
-async def new_round(message: types.Message):
+@dp.callback_query_handler(lambda c: c.data and c.data.startswith('ibtn'))
+async def process_callback_kb1btn1(callback_query: types.CallbackQuery):
+    """Handling all inline buttons"""
+    print(callback_query.__dict__)
+    await bot.edit_message_reply_markup(callback_query.from_user.id, callback_query.message.message_id, reply_markup=None)
+    await bot.answer_callback_query(callback_query.id, text=f'Нажата кнопка {callback_query.data}')
+
+
+"""Testing"""
+
+@dp.message_handler(lambda message: message.text.startswith('test1'))
+async def test_command2(message: types.Message):
     """Testing"""
-    chat_id = 146076472
+    chat_id = message.from_user.id
     #await message.answer_dice(emoji="🎲")
-    with open('hello.jpg', 'rb') as photo:
+    with open('res\hello.jpg', 'rb') as photo:
         await bot.send_photo(chat_id, photo)
-    keyboard = types.InlineKeyboardMarkup()
-    
-    keyboard.add(types.InlineKeyboardButton(text='Нажми меня', callback_data='button_pressed'))
-    await bot.send_message(chat_id, 'Привет, мир!', reply_markup=keyboard)
+
+@dp.message_handler()
+async def test_command1(message: types.Message):
+    pl = Player.auth(message.from_user)
+        # await message.reply("Кто победил?", reply_markup=kbi_winner_l)
+    # looking for command among button captions
+    cmd = ''
+    for k, v in MSG[LNG].items():
+        if message.text.startswith(v):
+            cmd = kb.btn2cmd[k]
+            logging.info(f"{message.text} -> {cmd}")
+
+    if cmd:
+        if m := pl.check_state(cmd):
+            await message.reply(m)
+            return
+        if cmd == 'new':
+            await new_game(message)
+        if cmd == 'join':
+            await join_game(message)
+        if cmd == 'quit':
+            await quit_game(message)
+        if cmd == 'loc':
+            await list_loc(message)
+        if cmd == 'game':
+            await game_info(message)
+        if cmd == 'round':
+            await start_round(message)
+        if cmd == 'finish':
+            await finish_round(message)
+        return
+
+
+    for k in kb.kbs[LNG].keys():
+        if k == message.text:
+            await message.reply(f"Вы просили клавиатуру {k}", reply_markup=kb.kbs[LNG][k])
+            return
+
+    game_name = message.text.split(' ')[0]
+    await join_game(message, game_name)
 
 @dp.errors_handler()
 async def errors_handler(update: types.Update, exception: Exception):
@@ -159,18 +257,21 @@ async def errors_handler(update: types.Update, exception: Exception):
 async def send_message(message: str):
     await bot.send_message(146076472, message)
 
-def test_log():
-    logging.debug('Отладочное сообщение')
-    logging.warning('Предупреждение')
-    logging.error('Ошибка')
-    logging.critical('Критическая ошибка')
+
+def test_add_users(game_name: str):
+    names = ["Oleg", "Ira", "Ivan", "Kirill"]
+    admin = None
+    for i in range(1, 5):
+        pl = Player((i, names[i - 1], "ru"))
+        if 100 == i:
+            pl.create_game(game_name)
+            admin = pl
+        else:
+            pl.join_game(game_name)
+    return admin
+
 
 if __name__ == '__main__':
    # asyncio.run(send_message('hi'))
     executor.start_polling(dp, skip_updates=True)
 
-
-"""
-146076472 (Oleg Eremin): You get 2 scores in round 5. Total: 2
-{"id": 146076472, "is_bot": false, "first_name": "Oleg", "last_name": "Eremin", "username": "Oeremin", "language_code": "ru"}
-"""
