@@ -15,16 +15,19 @@ for lang, d in MSG.items():
             btns[lang][k] = InlineKeyboardButton(v, callback_data=k)
 
 kbs = {'ru':
-   {'kb_init': ReplyKeyboardMarkup(resize_keyboard=True).add(btns['ru']['btn_create_game']).\
-        add(btns['ru']['btn_join_game']),
-    'kb_player': ReplyKeyboardMarkup(resize_keyboard=True).row(btns['ru']['btn_list_loc'],
-        btns['ru']['btn_game_info']).add(btns['ru']['btn_quit_game']),
-    'kb_admin': ReplyKeyboardMarkup(resize_keyboard=True).add(btns['ru']['btn_start_round']).\
-        row(btns['ru']['btn_list_loc'], btns['ru']['btn_game_info']).add(btns['ru']['btn_close_game']),
-    'kb_admin_2': ReplyKeyboardMarkup(resize_keyboard=True).add(btns['ru']['btn_finish_round']).\
-        row(btns['ru']['btn_list_loc'], btns['ru']['btn_game_info']).add(btns['ru']['btn_close_game'])
-    }
-}
+           {'kb_init': ReplyKeyboardMarkup(resize_keyboard=True).add(btns['ru']['btn_create_game']). \
+               add(btns['ru']['btn_join_game']),
+            'kb_player': ReplyKeyboardMarkup(resize_keyboard=True).row(btns['ru']['btn_list_loc'],
+                                                                       btns['ru']['btn_game_info']).add(
+                btns['ru']['btn_quit_game']),
+            'kb_admin': ReplyKeyboardMarkup(resize_keyboard=True).add(btns['ru']['btn_start_round']). \
+                row(btns['ru']['btn_list_loc'], btns['ru']['btn_game_info']).add(btns['ru']['btn_close_game']).
+            add(btns['ru']['btn_change_loc_set']),
+            'kb_admin_2': ReplyKeyboardMarkup(resize_keyboard=True).add(btns['ru']['btn_finish_round']). \
+                row(btns['ru']['btn_list_loc'], btns['ru']['btn_game_info']).add(btns['ru']['btn_close_game']). \
+                add(btns['ru']['btn_change_loc_set'])
+            }
+       }
 
 btn2cmd = {
     'btn_create_game': 'new',
@@ -42,11 +45,18 @@ btn2cmd = {
 def pl2kb(pls, lang='ru'):
     kb = InlineKeyboardMarkup()
     # add basic buttons
-    for k in ('spy_1', 'spy_2', 'spy_3', 'people'):
-        kb.add(btns[lang]['ibtn_win_'+k])
+    for k in ('spy_1', 'spy_2', 'spy_3', 'not_spy'):
+        kb.add(btns[lang]['ibtn_win_' + k])
     # add buttons with players name and id
     for i, pl in pls.items():
-        kb.insert(InlineKeyboardButton(text=pl.full_name, callback_data=i))
+        kb.insert(InlineKeyboardButton(text=pl.full_name, callback_data=f'ibtn_win_{i}'))
     kb.add(btns[lang]['ibtn_win_nobody'])
     return kb
 
+
+def locset2kb(set_names: list, lang='ru'):
+    kb = InlineKeyboardMarkup()
+    # add basic buttons
+    for i in set_names:
+        kb.insert(InlineKeyboardButton(text=i, callback_data=f'ibtn_loc_set_{i}'))
+    return kb

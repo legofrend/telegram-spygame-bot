@@ -1,17 +1,17 @@
 import os
+import re
 from typing import Dict, List, Tuple
 
 import sqlite3
-
 
 conn = sqlite3.connect(os.path.join("db", "spygame.db"))
 cursor = conn.cursor()
 
 
 def insert(table: str, column_values: Dict):
-    columns = ', '.join( column_values.keys() )
+    columns = ', '.join(column_values.keys())
     values = [tuple(column_values.values())]
-    placeholders = ", ".join( "?" * len(column_values.keys()) )
+    placeholders = ", ".join("?" * len(column_values.keys()))
     cursor.executemany(
         f"INSERT INTO {table} "
         f"({columns}) "
@@ -20,34 +20,11 @@ def insert(table: str, column_values: Dict):
     conn.commit()
 
 
-def fetchall(table: str, columns: List[str]) -> List[Tuple]:
+def fetchall(table: str, columns: List[str], where=None, distinct=False) -> List[Tuple]:
     columns_joined = ", ".join(columns)
-    cursor.execute(f"SELECT {columns_joined} FROM {table}")
-    rows = cursor.fetchall()
-    result = []
-    for row in rows:
-        dict_row = {}
-        for index, column in enumerate(columns):
-            dict_row[column] = row[index]
-        result.append(dict_row)
-    return result
-
-
-def fetchone(table: str, columns: List[str], id: int) -> tuple:
-    columns_joined = ", ".join(columns)
-    cursor.execute(f"SELECT {columns_joined} FROM {table} where id = {id}")
-    rows = cursor.fetchall()
-    row = rows[0]
-
-    dict_row = {}
-    for index, column in enumerate(columns):
-        dict_row[column] = row[index]
-    return dict_row
-
-
-def fetchuniq(table: str, columns: List[str], cond_col: str, cond_val: str) -> List[Tuple]:
-    columns_joined = ", ".join(columns)
-    sql = f"SELECT DISTINCT {columns_joined} FROM {table} where {cond_col} = '{cond_val}'"
+    sql = f"SELECT {'DISTINCT' if distinct else ''} {columns_joined} FROM {table}"
+    if where:
+        sql += ' WHERE ' + ' AND '.join(list(f'{k} = "{v}"' for k, v in where.items()))
     cursor.execute(sql)
     rows = cursor.fetchall()
     result = []
@@ -69,11 +46,28 @@ def get_cursor():
     return cursor
 
 
+def load_from_file(filename: str):
+    """Инициализирует БД"""
+    sql = 'INSERT INTO location  (set_name, lang, location, roles) VALUES \n'
+    values = []
+    with open(filename, "r", encoding="utf-8") as f:
+        l1 = f.readline().strip()
+        sep = ': ' if re.search(': ', l1) else '\t'
+        (lang, set_name) = l1.split(sep)
+        for line in f:
+            (loc, roles) = line.strip().split(sep)
+            values.append(f'("{set_name}", "{lang}", "{loc}", "{roles}")')
+    sql += ',\n'.join(values) + ';'
+    print(sql)
+    cursor.executescript(sql)
+    conn.commit()
+
+
 def _init_db():
     """Инициализирует БД"""
     with open("createdb.sql", "r", encoding="utf-8") as f:
         sql = f.read()
-    #print(sql)
+    # print(sql)
     cursor.executescript(sql)
     conn.commit()
 
@@ -87,10 +81,7 @@ def check_db_exists():
         return
     _init_db()
 
+
 check_db_exists()
 
-#_init_db()
-
-#cursor.execute("SELECT * FROM category")
-#print(cursor.fetchall())
-
+# load_from_file('res\\ru_countries.txt')
