@@ -4,6 +4,8 @@ from typing import Dict, List, Tuple
 
 import sqlite3
 
+BASE_RES_PATH = 'res'
+
 conn = sqlite3.connect(os.path.join("db", "spygame.db"))
 cursor = conn.cursor()
 
@@ -80,8 +82,19 @@ def check_db_exists():
     if table_exists:
         return
     _init_db()
+    for filename in os.listdir(BASE_RES_PATH):
+        if filename.startswith('.'):
+            continue
+        load_from_file(os.path.join(BASE_RES_PATH, filename))
 
+def load_all_files():
+    for filename in os.listdir(BASE_RES_PATH):
+        if filename.startswith('.'):
+            continue
+        print(os.path.join(BASE_RES_PATH, filename))
+        load_from_file(os.path.join(BASE_RES_PATH, filename))
+
+# test()
 
 check_db_exists()
 
-# load_from_file('res\\ru_countries.txt')
