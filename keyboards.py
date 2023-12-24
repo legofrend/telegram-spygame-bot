@@ -21,11 +21,11 @@ kbs = {'ru':
                                                                        btns['ru']['btn_game_info']).add(
                 btns['ru']['btn_quit_game']),
             'kb_admin': ReplyKeyboardMarkup(resize_keyboard=True).add(btns['ru']['btn_start_round']). \
-                row(btns['ru']['btn_list_loc'], btns['ru']['btn_game_info']).add(btns['ru']['btn_close_game']).
-            add(btns['ru']['btn_change_loc_set']),
+                row(btns['ru']['btn_list_loc'], btns['ru']['btn_game_info']).
+            add(btns['ru']['btn_change_loc_set']).add(btns['ru']['btn_close_game']),
             'kb_admin_2': ReplyKeyboardMarkup(resize_keyboard=True).add(btns['ru']['btn_finish_round']). \
-                row(btns['ru']['btn_list_loc'], btns['ru']['btn_game_info']).add(btns['ru']['btn_close_game']). \
-                add(btns['ru']['btn_change_loc_set'])
+                row(btns['ru']['btn_list_loc'], btns['ru']['btn_game_info']). \
+                add(btns['ru']['btn_change_loc_set']).add(btns['ru']['btn_close_game'])
             }
        }
 

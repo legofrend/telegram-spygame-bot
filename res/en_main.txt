@@ -1,0 +1,31 @@
+en	Main
+Restaurant	musician, visitor, bouncer, head waiter, chef, waiter, critic	restaurant.png
+Spa	client, stylist, massage therapist, makeup artist, manicurist, cosmetologist, dermatologist	spa.png
+Hotel	bartender, guest, maid, doorman, security guard, manager, receptionist	hotel.png
+University	student, janitor, rector, professor, graduate student, psychologist, dean	university.png
+Bank	client, security guard, robber, cashier, manager, collector, consultant	bank.png
+Hospital	therapist, surgeon, nurse, patient, pathologist, chief physician, intern	hospital.png
+Embassy	diplomat, ambassador, official, secretary, security guard, tourist, refugee	embassy.png
+Studio	sound engineer, stuntman, cameraman, costume designer, director, actor, extra	studio.png
+Shapito circus	trainer, visitor, magician, juggler, clown, knife thrower, acrobat	shapito circus.png
+Theater	cloakroom attendant, prompter, usher, spectator, director, actor, stagehand	theater.png
+Church	priest, sinner, chorister, parishioner, beggar, tourist, philanthropist	church.png
+Vegetable base	sanitary inspector, security guard, loader, accountant, foreman, laboratory assistant, driver	vegetable base.png
+Supermarket	merchandiser, security guard, promoter, cashier, butcher, cleaner, buyer	supermarket.png
+Police station	journalist, detective, lawyer, criminologist, archivist, patrolman, criminal	police station.png
+Corporate party	manager, presenter, uninvited guest, boss, secretary, accountant, courier	corporate party.png
+Ocean liner	rich passenger, steward, captain, bartender, musician, cook, radio operator	ocean liner.png
+Submarine	electromechanic, sailor, commander, navigator, hydroacousticist, cook, radio operator	submarine.png
+Service station	foreman, tire fitter, washer, motorcyclist, electrician, director, motorist	service station.png
+Polar station	expedition leader, geophysicist, biologist, meteorologist, physician, hydrologist, radio operator	polar station.png
+Beach	photographer with a monkey, animator, vacationer, paraglider, food delivery man, rescuer, thief	beach.png
+Military unit	shop assistant, junior officer, doctor, guard, private, colonel, deserter	military unit.png
+Crusader army	captured Saracen, servant, bishop, archer, monk, squire, knight	crusader army.png
+Passenger train	peddler, cook in a dining car, passenger, border guard, conductor, driver, fireman	passenger train.png
+School	class teacher, security guard, physical teacher, school student, director, janitor, head teacher	school.png
+Terrorist base	errand boy, cell leader, militant, suicide bomber, medic, recruit, shepherd	terrorist base.png
+Partisan detachment	captured policeman, scout, partisan, radio operator, medic, soldier, cook	partisan detachment.png
+Casino	gambling visitor, security chief, bouncer, sharpie, bartender, administrator, croupier	casino.png
+Pirate ship	bound prisoner, gunner, sailor, cabin boy, captain, cook, slave	pirate ship.png
+Orbital station	space tourist, research engineer, research engineer, doctor, pilot, commander, alien	orbital station.png
+Airplane	crew commander, business class passenger, economy class passenger, steward, co-pilot, flight engineer, stowaway	airplane.png

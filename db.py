@@ -22,6 +22,17 @@ def insert(table: str, column_values: Dict):
     conn.commit()
 
 
+def update(table: str, column_values: Dict, where: Dict):
+    """UPDATE location SET set_name = 'Main', lang = 'en' WHERE id = 335"""
+    columns = ', '.join(column_values.keys())
+    values = [tuple(column_values.values())]
+    sql = f"UPDATE {table} SET "
+    sql += ', '.join(list(f'{k} = "{v}"' for k, v in column_values.items()))
+    sql += ' WHERE ' + ' AND '.join(list(f'{k} = "{v}"' for k, v in where.items()))
+    cursor.execute(sql)
+    conn.commit()
+
+
 def fetchall(table: str, columns: List[str], where=None, distinct=False) -> List[Tuple]:
     columns_joined = ", ".join(columns)
     sql = f"SELECT {'DISTINCT' if distinct else ''} {columns_joined} FROM {table}"
@@ -35,6 +46,7 @@ def fetchall(table: str, columns: List[str], where=None, distinct=False) -> List
         for index, column in enumerate(columns):
             dict_row[column] = row[index]
         result.append(dict_row)
+    # print(result)
     return result
 
 
@@ -50,15 +62,16 @@ def get_cursor():
 
 def load_from_file(filename: str):
     """Инициализирует БД"""
-    sql = 'INSERT INTO location  (set_name, lang, location, roles) VALUES \n'
+    sql = 'INSERT INTO location  (set_name, lang, location, roles, filename) VALUES \n'
     values = []
     with open(filename, "r", encoding="utf-8") as f:
         l1 = f.readline().strip()
-        sep = ': ' if re.search(': ', l1) else '\t'
+        sep = '\t'
         (lang, set_name) = l1.split(sep)
         for line in f:
-            (loc, roles) = line.strip().split(sep)
-            values.append(f'("{set_name}", "{lang}", "{loc}", "{roles}")')
+            l = line.strip()+'\t'
+            (loc, roles, filename) = l.split(sep)[:3]
+            values.append(f'("{set_name}", "{lang}", "{loc}", "{roles}", "{filename}")')
     sql += ',\n'.join(values) + ';'
     print(sql)
     cursor.executescript(sql)
@@ -91,10 +104,10 @@ def load_all_files():
     for filename in os.listdir(BASE_RES_PATH):
         if filename.startswith('.'):
             continue
-        print(os.path.join(BASE_RES_PATH, filename))
+        # if filename.startswith('en_main'):
+        #     print(os.path.join(BASE_RES_PATH, filename))
         load_from_file(os.path.join(BASE_RES_PATH, filename))
 
 # test()
-
 check_db_exists()
 

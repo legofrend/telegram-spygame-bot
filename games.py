@@ -63,6 +63,9 @@ class Location:
     def load_from_file(self, filename: str):
         db.load_from_file(filename)
 
+    def update_pic_id(self, pic_id: str):
+        db.update('location', {'file_id': pic_id}, {'filename': self.pic})
+        self.pic_id = pic_id
 
 class Round():
     """Структура раунда игры"""
@@ -134,14 +137,20 @@ class Game():
         self.admin = admin
         self.players = {admin.id: admin}
         self.scores = {admin.id: 0}
-        self.set_name = set_name if set_name else DEFAULT_SET
-        l = db.fetchall('location', ['id'], {'set_name': set_name})
-        loc_list = [item['id'] for item in l]
-        random.shuffle(loc_list)
-        self.loc_list = loc_list[:MAX_LOC_SET_SIZE]
         self.round_nbr = 0
         self.round = None
         self._games[name] = self
+        self.loc_list = []
+        self.set_name = ''
+        self.load_locations(set_name)
+
+    def load_locations(self, set_name):
+        self.set_name = set_name
+        loc_list = db.fetchall('location', ['id', 'location'], {'set_name': set_name})
+        # loc_list = [item['id'] for item in l]
+        random.shuffle(loc_list)
+        self.loc_list = self.loc_list[:self.round_nbr] + loc_list[:MAX_LOC_SET_SIZE]
+
 
     def __del__(self):
         n = len(Game._games)
@@ -169,7 +178,7 @@ class Game():
         """Start new round"""
         self.round_nbr += 1
         i = (self.round_nbr - 1) % len(self.loc_list)
-        loc_id = self.loc_list[i]
+        loc_id = self.loc_list[i]['id']
         loc = Location(loc_id)
         spy = random.choice(list(self.players.keys()))
         self.round = Round(self, loc, spy)
@@ -216,7 +225,15 @@ class Game():
         result = list((self.players[k].full_name, v) for (k, v) in spls.items())
         return result
 
-    def get_locations(self) -> list:
+    def get_locations(self) -> tuple:
+        """Get all locations in a game"""
+        loc_list = [item['location'] for item in self.loc_list]
+        loc_past = loc_list[:self.round_nbr]
+        loc_future = loc_list[self.round_nbr:]
+        loc_future.sort()
+        return loc_past, loc_future
+
+    def get_locations_old(self) -> list:
         """Get all locations in a game"""
         # ToDo fix bug for countries, there is limit locations in a game, not all needed
         l = db.fetchall('location', ['location'], {'set_name': self.set_name})
@@ -231,11 +248,7 @@ class Game():
         return loc_set_list
 
     def change_loc_set(self, set_name: str):
-        self.set_name = set_name
-        l = db.fetchall('location', ['id'], {'set_name': set_name})
-        self.loc_list = [item['id'] for item in l]
-        random.shuffle(self.loc_list)
-        self.loc_list = self.loc_list[:MAX_LOC_SET_SIZE]
+        self.load_locations(set_name)
 
 class Player():
     """Структура игрока"""
@@ -248,6 +261,8 @@ class Player():
 
     @classmethod
     def auth(cls, user):
+        if isinstance(user, int):
+            return cls._pls[user]
         if user.id in cls._pls.keys():
             return cls._pls[user.id]
         else:
@@ -271,7 +286,7 @@ class Player():
         self.game = Game(game_name, self, set_name)
         self.is_admin = True
         self.kb = kb.kbs[self.language_code]['kb_admin']
-        return f"Cоздал игру: {game_name}"
+        return f"Cоздал игру: `{game_name}`"
 
     def join_game(self, game_name: str) -> str:
         if err_msg := self.check_command("join", game_name):
@@ -339,7 +354,10 @@ class Player():
         """Выводит список локаций"""
         if err_msg := self.check_command("loc"):
             return err_msg
-        return 'Список мест:\n' + ', '.join(self.game.get_locations())
+        (loc_past, loc_future) = self.game.get_locations()
+        return (f'Список мест\nБыли {len(loc_past)}: ' + ', '.join(loc_past) +
+                f'\nОстались {len(loc_future)}: ' + ', '.join(loc_future))
+
 
     def list_loc_set(self):
         """Выводит список локаций"""

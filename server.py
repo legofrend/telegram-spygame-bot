@@ -1,4 +1,5 @@
 """Сервер Telegram бота, запускаемый непосредственно"""
+__version__ = '2.0.1'
 import logging
 import os, re, copy
 import asyncio
@@ -42,7 +43,7 @@ async def send_welcome(message: types.Message):
     """Отправляет приветственное сообщение и помощь по боту"""
     pl = Player.auth(message.from_user)
     pl._log_action(message.get_command(True))
-    await message.answer(MSG[LNG]['msg_greeting'], reply_markup=pl.kb)
+    await message.answer(MSG[LNG]['msg_greeting'], reply_markup=pl.kb, parse_mode='HTML')
 
 
 
@@ -53,7 +54,7 @@ async def new_game(message: types.Message):
     game_name = message.get_args() or Player.suggest_name()
     pl = Player.auth(message.from_user)
     answer_message = pl.create_game(game_name)
-    await message.answer(answer_message, reply_markup=pl.kb)
+    await message.answer(answer_message, reply_markup=pl.kb, parse_mode='MarkdownV2')
 
 
 @dp.message_handler(commands=['join'], state=None)
@@ -81,7 +82,9 @@ async def join_game_get_name(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         cmd = data['cmd']
         if cmd == 'join':
-            pl.join_game(message.text)
+            answer_message = pl.join_game(message.text)
+            await message.answer(answer_message, reply_markup=pl.kb)
+            await bot.send_message(pl.game.admin.id, f'Игрок {pl.full_name} присоединился к вашей игре')
     await state.finish()
 
 
@@ -104,6 +107,8 @@ async def start_round(message: types.Message):
     for pl_id, m in result.items():
         if pl_id < 100:
             continue
+        if pl_id != pl.game.round.spy:
+            await send_loc_image_to_pl(Player.auth(pl_id))
         if pl_id == pl.id:
             await bot.send_message(pl_id, m, reply_markup=pl.kb)
         else:
@@ -188,7 +193,7 @@ async def ibtn_clc_get_winner(callback_query: types.CallbackQuery):
 
 """Testing"""
 
-@dp.message_handler(commands=['add_test_users'])
+@dp.message_handler(lambda message: message.text.startswith('test'))
 async def add_test_users(message: types.Message):
     pl = Player.auth(message.from_user)
     game_name : str
@@ -198,7 +203,7 @@ async def add_test_users(message: types.Message):
         admin = Player((99, 'Admin Adminov', "ru"))
         admin.create_game(game_name)
         pl.join_game(game_name)
-        await message.answer(f'Создал игру {game_name} и добавил вас туда', pl.kb)
+        await message.answer(f'Создал игру {game_name} и добавил вас туда', reply_markup=pl.kb)
     else:
         game_name = pl.game.name
 
@@ -209,13 +214,49 @@ async def add_test_users(message: types.Message):
     await message.answer('Добавил ботов')
     return admin
 
-@dp.message_handler(lambda message: message.text.startswith('test1'))
-async def test_command2(message: types.Message):
+
+@dp.message_handler(lambda message: message.text.startswith('photo'))
+async def send_image(message: types.Message):
     """Testing"""
-    chat_id = message.from_user.id
-    # await message.answer_dice(emoji="🎲")
-    with open('res\hello.jpg', 'rb') as photo:
-        await bot.send_photo(chat_id, photo)
+    pl = Player.auth(message.from_user)
+    await send_loc_image_to_pl(pl)
+
+
+@dp.message_handler(lambda message: message.text.startswith('code'))
+async def send_image(message: types.Message):
+    """Testing"""
+    await message.answer("""Название игры _12356_ *bold \*text*
+                    _italic \*text_
+                    __underline__
+                    ~strikethrough~
+                    ||spoiler||
+                    `inline fixed-width code`
+                    ```
+                    pre-formatted fixed-width code block
+                    ```
+                    ```python
+                    pre-formatted fixed-width code block written in the Python programming language
+                    ```""", parse_mode='MarkdownV2')
+
+
+async def send_loc_image_to_pl(pl: Player):
+    """Send image of current location to player"""
+    try:
+        if pl.game is None:
+            return
+        l = pl.game.round.location
+        if l.pic_id:
+            msg = await bot.send_photo(pl.id, l.pic_id)
+            return
+        if l.pic:
+            with open(os.path.join('pics', l.pic), 'rb') as photo:
+                msg = await bot.send_photo(pl.id, photo)
+                file_id = msg.photo[-1].file_id
+                logging.info(file_id)
+                l.update_pic_id(file_id)
+            return
+    except:
+        logging.error(f'Не получилось отправить картинку для локации {l.id} {l.name}, {l.pic}')
 
 
 @dp.message_handler()
