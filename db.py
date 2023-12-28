@@ -73,7 +73,7 @@ def load_from_file(filename: str):
             (loc, roles, filename) = l.split(sep)[:3]
             values.append(f'("{set_name}", "{lang}", "{loc}", "{roles}", "{filename}")')
     sql += ',\n'.join(values) + ';'
-    print(sql)
+    # print(sql)
     cursor.executescript(sql)
     conn.commit()
 

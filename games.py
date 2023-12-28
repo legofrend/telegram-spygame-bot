@@ -12,11 +12,10 @@ from msg import _msg
 import keyboards as kb
 import exceptions
 
-CONST_SPY = 'шпион'
 DEFAULT_SET = 'Основной'
 MAX_LOC_SET_SIZE = 30
 ROUND_TIME_MIN = 7
-SUPPORT_LANGUAGES = {'ru'}
+SUPPORT_LANGUAGES = {'ru', 'en'}
 commands = {'new', 'join', 'quit', 'close', 'round', 'finish', 'winner', 'loc', 'game', 'stat', 'change'}
 _winner_type_spy = {'spy_1', 'spy_2', 'spy_3'}
 _winner_type = _winner_type_spy.union({'not_spy', 'pl_id', 'nobody'})
@@ -66,6 +65,7 @@ class Location:
     def update_pic_id(self, pic_id: str):
         db.update('location', {'file_id': pic_id}, {'filename': self.pic})
         self.pic_id = pic_id
+
 
 class Round():
     """Структура раунда игры"""
@@ -151,7 +151,6 @@ class Game():
         random.shuffle(loc_list)
         self.loc_list = self.loc_list[:self.round_nbr] + loc_list[:MAX_LOC_SET_SIZE]
 
-
     def __del__(self):
         n = len(Game._games)
         logging.info(f'Game {self.name} deleted. Keep in memory {n} games')
@@ -185,7 +184,7 @@ class Game():
         role_index = 0
         for pl in self.players.keys():
             if pl == spy:
-                role = CONST_SPY
+                role = self.players[pl].msg('spy_role')
             else:
                 if role_index >= len(loc.roles): role_index = 0
                 role = loc.roles[role_index]
@@ -233,16 +232,8 @@ class Game():
         loc_future.sort()
         return loc_past, loc_future
 
-    def get_locations_old(self) -> list:
-        """Get all locations in a game"""
-        # ToDo fix bug for countries, there is limit locations in a game, not all needed
-        l = db.fetchall('location', ['location'], {'set_name': self.set_name})
-        loc_list = [item['location'] for item in l]
-        loc_list.sort()
-        return loc_list
-
-    def get_loc_sets(self, lng: str = 'ru'):
-        l = db.fetchall('location', ['set_name'], {'lang': lng}, True)
+    def get_loc_sets(self, lng: str = None):
+        l = db.fetchall('location', ['set_name'], {'lang': lng} if lng else None, True)
         loc_set_list = [item['set_name'] for item in l]
         loc_set_list.sort()
         return loc_set_list
@@ -250,12 +241,13 @@ class Game():
     def change_loc_set(self, set_name: str):
         self.load_locations(set_name)
 
+
 class Player():
     """Структура игрока"""
     _pls = {}
 
     @staticmethod
-    def suggest_name(game_name='', n=6) -> str:
+    def suggest_name(game_name='', n=8) -> str:
         suggested_name = game_name + ''.join(random.choices(string.ascii_uppercase + string.digits, k=n))
         return suggested_name
 
@@ -277,6 +269,15 @@ class Player():
         self.is_admin = False
         self._pls[self.id] = self
         self.kb = kb.kbs[self.language_code]['kb_init']
+        self.nps = None
+
+    def msg(self, msg_code: str):
+        return _msg(msg_code, self.language_code)
+
+    def stat(self):
+        pl_names = ', '.join([x.full_name for x in self._pls.values()])
+        g_names = ', '.join([x.name for x in Game._games.values()])
+        return f'Игроков {len(self._pls)}: {pl_names}\nИгр {len(Game._games)}: {g_names}'
 
     def create_game(self, game_name: str, set_name=DEFAULT_SET) -> str:
         """Creating new game"""
@@ -286,7 +287,7 @@ class Player():
         self.game = Game(game_name, self, set_name)
         self.is_admin = True
         self.kb = kb.kbs[self.language_code]['kb_admin']
-        return f"Cоздал игру: `{game_name}`"
+        return self.msg('msg_create_game').format(game_name=game_name)
 
     def join_game(self, game_name: str) -> str:
         if err_msg := self.check_command("join", game_name):
@@ -297,8 +298,7 @@ class Player():
         self.game.join(self)
         logging.info(f'{self.full_name} joined the game {game_name}')
         self.kb = kb.kbs[self.language_code]['kb_player']
-        return f'Вы присоединились к игре {game_name}, дождитесь старта раунда. \
-            Посмотреть кто в игре можно командой /game'
+        return self.msg('msg_you_join_game').format(game_name=game_name)
 
     def quit_game(self):
         """Quit from the game for a player"""
@@ -307,7 +307,7 @@ class Player():
 
         self.game.close() if self.is_admin else self.game.quit(self.id)
         self.kb = kb.kbs[self.language_code]['kb_init']
-        return f'Вы вышли из игры'
+        return self.msg('msg_you_quit_game')
 
     def start_round(self):
         """Запускает новый раунд"""
@@ -317,13 +317,13 @@ class Player():
         r = self.game.start_round()
         start_str = r.started.strftime("%H:%M:%S")
         finish_str = r.finished.strftime("%H:%M:%S")
-        msg = f"Раунд {r.round_nbr}: {start_str} - {finish_str}\n"
+        msg = self.msg('msg_round') + f' {r.round_nbr}: {start_str} - {finish_str}\n'
 
         # prepare messages for all players as list
         msg_list = {}
         for pl_id, role in r.roles.items():
             loc_name = "???" if r.spy == pl_id else r.location.name
-            msg_list[pl_id] = msg + f"Место: {loc_name}\nВы: {role}"
+            msg_list[pl_id] = msg + self.msg('msg_your_location_role').format(loc_name=loc_name, role=role)
             logging.info(f"{pl_id}: {msg_list[pl_id]}")
         self.kb = kb.kbs[self.language_code]['kb_admin_2']
         return msg_list
@@ -334,7 +334,7 @@ class Player():
             return err_msg
 
         self.game.round.finish()
-        answer_message = f"Раунд {self.game.round_nbr} закончен\nКто победил?"
+        answer_message = self.msg('msg_round_finished_who_win').format(round_nbr=self.game.round_nbr)
         self.kb = kb.pl2kb(self.game.players, self.language_code)
         return answer_message
 
@@ -344,7 +344,8 @@ class Player():
             return err_msg
 
         results = self.game.round.set_winner(winner_type)
-        answer_message = ('Шпион победил' if _is_spy_win(winner_type) else 'Шпион проиграл') + '\n'
+        answer_message = (self.msg(f'msg_winner_is_{winner_type}') if _is_spy_win(winner_type)
+                          else self.msg('msg_winner_is_not_spy')) + '\n'
         for (name, sc, tsc) in results:
             answer_message += f"{name}: {sc} ({tsc})\n"
         self.kb = kb.kbs[self.language_code]['kb_admin']
@@ -355,9 +356,9 @@ class Player():
         if err_msg := self.check_command("loc"):
             return err_msg
         (loc_past, loc_future) = self.game.get_locations()
-        return (f'Список мест\nБыли {len(loc_past)}: ' + ', '.join(loc_past) +
-                f'\nОстались {len(loc_future)}: ' + ', '.join(loc_future))
-
+        msg = self.msg('msg_loc_info {n1, l1, n2, l2}').format(n1=len(loc_past), l1=', '.join(loc_past),
+                                                               n2=len(loc_future), l2=', '.join(loc_future))
+        return msg
 
     def list_loc_set(self):
         """Выводит список локаций"""
@@ -368,7 +369,7 @@ class Player():
 
     def change_loc_set(self, set_name: str):
         self.game.change_loc_set(set_name)
-        return f'Изменил набор мест: {set_name}'
+        return self.msg('msg_change_set').format(set_name=set_name)
 
     def game_info(self):
         """Информация о текущей игре"""
@@ -376,9 +377,8 @@ class Player():
             return err_msg
 
         g = self.game
-        pl_nbr = len(g.players)
         info = g.get_info()
-        answer_message = f'Игра {g.name}, раунд {g.round_nbr}, игроков {pl_nbr}, очки:\n'
+        answer_message = self.msg('msg_game_stat {name, r, n}').format(name=g.name, r=g.round_nbr, n=len(g.players))
         for (name, score) in info:
             answer_message += f"{name}: {score}\n"
         return answer_message
@@ -397,26 +397,53 @@ class Player():
         self._log_action(comm)
         if comm in ['new', 'create', 'join']:
             if self.game is not None:
-                return _msg('IN_GAME', self)
+                return self.msg('emsg_already_in_game')
             g = Game.find(arg)
             if comm == 'join' and g is None:
-                return _msg('GAME_NOT_FOUND', self)
+                return self.msg('emsg_game_not_found')
             elif comm in ['new', 'create'] and g is not None:
-                return _msg('GAME_EXIST', self)
+                return self.msg('emsg_game_exist')
             else:
                 return ''
         elif comm in ['loc', 'game', 'quit']:
-            return _msg('NO_GAME', self) if self.game is None else ''
+            return self.msg('emsg_not_in_game') if self.game is None else ''
         elif comm in ['change']:
-            return _msg('NOT_ADMIN', self) if not self.is_admin else ''
+            return self.msg('emsg_not_admin') if not self.is_admin else ''
         elif comm in ['round', 'finish', 'winner']:
             if self.game is None:
-                return _msg('NO_GAME', self)
+                return self.msg('emsg_not_in_game')
             if not self.is_admin:
-                return _msg('NOT_ADMIN', self)
+                return self.msg('emsg_not_admin')
             if comm == 'winner' and not (arg in _winner_type or arg.isdigit()):
-                return _msg('emsg_unknown_winner_type', self)
+                return self.msg('emsg_unknown_winner_type')
             return ''
+
+    def get_nps(self, is_recent=True):
+        if self.nps:
+            return self.nps
+
+        l = db.fetchall('nps', 'nps datetime_stamp'.split(), {'id': id})[0]
+        if not l:
+            return
+        if not is_recent or l['datetime_stamp'] >= (_get_now_datetime() - dt.timedelta(days=360)):
+            self.nps = l['nps']
+        return self.nps
+
+    def set_nps(self, nps: int, comment: str = ''):
+        self.nps = nps
+        inserted_row_id = db.insert('nps', {
+            'datetime_stamp': _get_now_datetime(),
+            'user_id': self.id,
+            'nps': self.nps,
+            'comment': comment
+        })
+        if nps > 8:
+            msg = ('Спасибо за высокую оценку\. Если захотите поддержать, можете перевести любую сумму по СБП на счет '
+                   ' автора в Тинькофф по номеру телефона ||79262830634||')
+
+        else:
+            msg = 'Какие изменения Вы бы предложили для улучшения бота?'
+        return msg
 
 
 def _get_now_formatted() -> str:

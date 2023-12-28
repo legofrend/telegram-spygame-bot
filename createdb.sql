@@ -24,11 +24,18 @@ create table round(
     FOREIGN KEY(location_id) REFERENCES location(id)
 );
 
-
 create table log(
+    id integer primary key,
     datetime_stamp datetime,
     user_id integer,
     game_id varchar(255),
     action varchar(10)
 );
 
+create table nps(
+    id integer primary key,
+    datetime_stamp datetime,
+    user_id integer,
+    nps integer,
+    comment varchar(500)
+);

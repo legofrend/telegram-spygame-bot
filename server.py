@@ -1,5 +1,5 @@
 """Сервер Telegram бота, запускаемый непосредственно"""
-__version__ = '2.0.1'
+
 import logging
 import os, re, copy
 import asyncio
@@ -10,15 +10,14 @@ from aiogram.contrib.middlewares.logging import LoggingMiddleware
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 
-from games import Player, _winner_type
+from games import Player, SUPPORT_LANGUAGES
 from msg import MSG, _msg
 import keyboards as kb
 
-SLEEP_BTW_UPDATE = 60
 
 class FSMUser(StatesGroup):
     wait_name = State()
-    wait_winner = State()
+    wait_comment = State()
 
 
 logging.basicConfig(level=logging.INFO)
@@ -31,45 +30,50 @@ PROXY_AUTH = None
     login=os.getenv("TELEGRAM_PROXY_LOGIN"),
     password=os.getenv("TELEGRAM_PROXY_PASSWORD")
 )"""
-LNG = 'ru'
+SUPERUSER_TG_ID = 146076472
+SLEEP_BTW_UPDATE = 60
 
 bot = Bot(token=API_TOKEN, proxy=PROXY_URL, proxy_auth=PROXY_AUTH)
 dp = Dispatcher(bot, storage=MemoryStorage())
 dp.middleware.setup(LoggingMiddleware())
+
+async def send_notification_suser(msg: str):
+    await bot.send_message(SUPERUSER_TG_ID, msg)
+
 
 
 @dp.message_handler(commands=['start', 'help'])
 async def send_welcome(message: types.Message):
     """Отправляет приветственное сообщение и помощь по боту"""
     pl = Player.auth(message.from_user)
+    # ToDo remove this command into Player class, get read of using _log and _msg here
     pl._log_action(message.get_command(True))
-    await message.answer(MSG[LNG]['msg_greeting'], reply_markup=pl.kb, parse_mode='HTML')
-
+    await message.answer(pl.msg('msg_greeting'), reply_markup=pl.kb, parse_mode='HTML')
+    if pl.id != SUPERUSER_TG_ID and message.get_command(True) == 'start':
+        await send_notification_suser(f'Новый пользователь {pl.full_name} запустил бота')
 
 
 @dp.message_handler(commands=['new'])
 async def new_game(message: types.Message):
     """Создает новую игру с названием Game"""
-    cmd = message.get_command(True)
     game_name = message.get_args() or Player.suggest_name()
     pl = Player.auth(message.from_user)
     answer_message = pl.create_game(game_name)
     await message.answer(answer_message, reply_markup=pl.kb, parse_mode='MarkdownV2')
+    if pl.id != SUPERUSER_TG_ID:
+        await send_notification_suser(f'{pl.full_name} создал игру')
 
 
-@dp.message_handler(commands=['join'], state=None)
-async def join_game(message: types.Message, state: FSMContext):
+@dp.message_handler(commands=['join'])
+async def join_game(message: types.Message):
     """Присоединиться к созданной игре с названием Game"""
+    pl = Player.auth(message.from_user)
     game_name = message.get_args()
     if not game_name:
-        answer_message = "Укажите название игры, в которую хотите присоединиться"
-        async with state.proxy() as data:
-            data['cmd'] = 'join'
         await FSMUser.wait_name.set()
-        await message.answer(answer_message)
+        await message.answer(_msg('msg_choose_game_name', pl))
         return
 
-    pl = Player.auth(message.from_user)
     answer_message = pl.join_game(game_name)
     await message.answer(answer_message, reply_markup=pl.kb)
 
@@ -77,14 +81,10 @@ async def join_game(message: types.Message, state: FSMContext):
 @dp.message_handler(state=FSMUser.wait_name)
 async def join_game_get_name(message: types.Message, state: FSMContext):
     """User write command without argument. Waiting them"""
-    logging.info(f'State is {state}')
     pl = Player.auth(message.from_user)
-    async with state.proxy() as data:
-        cmd = data['cmd']
-        if cmd == 'join':
-            answer_message = pl.join_game(message.text)
-            await message.answer(answer_message, reply_markup=pl.kb)
-            await bot.send_message(pl.game.admin.id, f'Игрок {pl.full_name} присоединился к вашей игре')
+    answer_message = pl.join_game(message.text)
+    await message.answer(answer_message, reply_markup=pl.kb)
+    await bot.send_message(pl.game.admin.id, _msg('msg_pl_join_your_game', pl).format(pl=pl))
     await state.finish()
 
 
@@ -92,8 +92,12 @@ async def join_game_get_name(message: types.Message, state: FSMContext):
 async def quit_game(message: types.Message):
     """Выйти из игры"""
     pl = Player.auth(message.from_user)
+    round_nbr = pl.game.round_nbr
     answer_message = pl.quit_game()
     await message.answer(answer_message, reply_markup=pl.kb)
+
+    if round_nbr > 5 and not pl.get_nps():
+        await message.answer(pl.msg('msg_ask_nps_score'), reply_markup=kb.nps)
 
 
 @dp.message_handler(commands=['round'])
@@ -115,12 +119,11 @@ async def start_round(message: types.Message):
             await bot.send_message(pl_id, m)
 
     timer = pl.game.round.dur_min
-    timer_msg = await message.answer(f"Осталось минут: {timer}")
-    # print(timer_msg.__dict__)
+    timer_msg = await message.answer(_msg('msg_time_left', pl).format(timer=timer))
     while True:
         await asyncio.sleep(SLEEP_BTW_UPDATE)
         timer -= 1
-        await bot.edit_message_text(f"Осталось минут: {timer}", pl.id, timer_msg.message_id)
+        await bot.edit_message_text(_msg('msg_time_left', pl).format(timer=timer), pl.id, timer_msg.message_id)
         if timer <= 0 or pl.game.round.in_progress == 0:
             break
     if pl.game.round.in_progress == 1:
@@ -129,9 +132,9 @@ async def start_round(message: types.Message):
         await finish_round(message)
 
 
-@dp.message_handler(commands=['finish'], state='*')
+@dp.message_handler(commands=['finish'])
 async def finish_round(message: types.Message):
-    """Выбран победитель раунда"""
+    """Нажали кнопку завершить раунд"""
     pl = Player.auth(message.from_user)
     answer_message = pl.finish_round()
     await message.answer(answer_message, reply_markup=pl.kb)
@@ -140,9 +143,9 @@ async def finish_round(message: types.Message):
 @dp.callback_query_handler(lambda c: c.data.startswith('ibtn_win'))
 async def ibtn_clc_get_winner(callback_query: types.CallbackQuery):
     """When round is finished handling all inline buttons with winner name"""
-    await bot.answer_callback_query(callback_query.id, text=f'Победил {callback_query.data}')
-
     pl = Player.auth(callback_query.from_user)
+    await bot.answer_callback_query(callback_query.id, text=_msg('msg_winner_is', pl) + f' {callback_query.data}')
+
     l: int = len('ibtn_win_')
     winner_type = callback_query.data[l:]  # get XXX from data as ibtn_win_XXX
     answer_message = pl.set_winner(winner_type)
@@ -175,13 +178,15 @@ async def change_loc_set(message: types.Message):
     set_names = pl.list_loc_set()
     if not set_names:
         return
-    await message.answer("Выберите набор?", reply_markup=kb.locset2kb(set_names, LNG))
+    await message.answer(_msg('msg_choose_set_name', pl), reply_markup=kb.locset2kb(set_names))
 
 
 @dp.callback_query_handler(lambda c: c.data.startswith('ibtn_loc_set'))
 async def ibtn_clc_get_winner(callback_query: types.CallbackQuery):
     """When round is finished handling all inline buttons with winner name"""
     await bot.answer_callback_query(callback_query.id, text=f'{callback_query.data}')
+    await bot.edit_message_reply_markup(callback_query.from_user.id, callback_query.message.message_id,
+                                        reply_markup=None)
 
     pl = Player.auth(callback_query.from_user)
     l = len('ibtn_loc_set_')
@@ -191,7 +196,30 @@ async def ibtn_clc_get_winner(callback_query: types.CallbackQuery):
     await bot.send_message(callback_query.from_user.id, answer_message, reply_markup=pl.kb)
 
 
+@dp.callback_query_handler(lambda c: c.data.isdigit())
+async def ibtn_clc_nps_score(callback_query: types.CallbackQuery, state: FSMContext):
+    """When user click on button with number with NPS score 1-10"""
+    await bot.answer_callback_query(callback_query.id, text=f'{callback_query.data}')
+    await bot.edit_message_reply_markup(callback_query.from_user.id, callback_query.message.message_id,
+                                        reply_markup=None)
+    pl = Player.auth(callback_query.from_user)
+    nps = int(callback_query.data)
+    msg = pl.set_nps(nps)
+    if nps < 9:
+        await FSMUser.wait_comment.set()
+    await bot.send_message(pl.id, msg, parse_mode='MarkdownV2')
+
+
+@dp.message_handler(state=FSMUser.wait_comment)
+async def nps_get_comment(message: types.Message, state: FSMContext):
+    """User write command without argument. Waiting them"""
+    pl = Player.auth(message.from_user)
+    await bot.send_message(SUPERUSER_TG_ID, f'{pl.full_name} ({pl.id}) NPS score {pl.nps}, comment: {message.text}')
+    await state.finish()
+
+
 """Testing"""
+
 
 @dp.message_handler(lambda message: message.text.startswith('test'))
 async def add_test_users(message: types.Message):
@@ -215,28 +243,26 @@ async def add_test_users(message: types.Message):
     return admin
 
 
+@dp.message_handler(lambda message: message.text.startswith('mem'))
+async def send_image(message: types.Message):
+    """Testing"""
+    pl = Player.auth(message.from_user)
+    if pl.id == SUPERUSER_TG_ID:
+        await message.answer(pl.stat())
+
+
+@dp.message_handler(lambda message: message.text.startswith('nps'))
+async def test_nps_kb(message: types.Message):
+    pl = Player.auth(message.from_user)
+    await message.answer('Пожалуйста, оцените по шкале от 1 до 10, насколько вероятно, '
+                         'что Вы порекомендуете нас другу или коллеге?', reply_markup=kb.nps)
+
+
 @dp.message_handler(lambda message: message.text.startswith('photo'))
 async def send_image(message: types.Message):
     """Testing"""
     pl = Player.auth(message.from_user)
     await send_loc_image_to_pl(pl)
-
-
-@dp.message_handler(lambda message: message.text.startswith('code'))
-async def send_image(message: types.Message):
-    """Testing"""
-    await message.answer("""Название игры _12356_ *bold \*text*
-                    _italic \*text_
-                    __underline__
-                    ~strikethrough~
-                    ||spoiler||
-                    `inline fixed-width code`
-                    ```
-                    pre-formatted fixed-width code block
-                    ```
-                    ```python
-                    pre-formatted fixed-width code block written in the Python programming language
-                    ```""", parse_mode='MarkdownV2')
 
 
 async def send_loc_image_to_pl(pl: Player):
@@ -261,37 +287,35 @@ async def send_loc_image_to_pl(pl: Player):
 
 @dp.message_handler()
 async def parse_command(message: types.Message, state: FSMContext):
+    cmd2fnc = {'new': new_game,
+                'join': join_game,
+                'quit': quit_game,
+                'close': quit_game,
+                'loc': list_loc,
+                'game': game_info,
+                'round': start_round,
+                'finish': finish_round,
+                'change': change_loc_set
+                }
+
     pl = Player.auth(message.from_user)
     # looking for command among button captions
-    cmd = ''
-    for k, v in MSG[LNG].items():
-        if message.text.startswith(v):
-            cmd = kb.btn2cmd[k]
-            logging.info(f"{message.text} -> {cmd}")
+    cmd = kb.text2cmd(message.text)
+    if cmd == 'join':
+        return await cmd2fnc[cmd](message, state)
+    elif cmd:
+        return await cmd2fnc[cmd](message)
 
-    if cmd:
-        if cmd == 'new':
-            await new_game(message)
-        if cmd == 'join':
-            await join_game(message, state)
-        if cmd in ['quit', 'close']:
-            await quit_game(message)
-        if cmd == 'loc':
-            await list_loc(message)
-        if cmd == 'game':
-            await game_info(message)
-        if cmd == 'round':
-            await start_round(message)
-        if cmd == 'finish':
-            await finish_round(message)
-        return
-
-    for k in kb.kbs[LNG].keys():
+    for k in kb.kbs[pl.language_code].keys():
         if k == message.text:
-            await message.reply(f"Вы просили клавиатуру {k}", reply_markup=kb.kbs[LNG][k])
+            await message.reply(f"Вы просили клавиатуру {k}", reply_markup=kb.kbs[pl.language_code][k])
             return
 
-    await message.reply(f"Не пойму о чем ты", reply_markup=pl.kb)
+    if message.text in SUPPORT_LANGUAGES:
+        pl.language_code = message.text
+        return await message.reply('Поменял ваш язык:' + pl.language_code, reply_markup=pl.kb)
+
+    await message.reply(pl.msg('msg_unknown_command'), reply_markup=pl.kb)
 
 
 @dp.errors_handler()
@@ -302,10 +326,6 @@ async def errors_handler(update: types.Update, exception: Exception):
 async def shutdown(dispatcher: Dispatcher):
     await dispatcher.storage.close()
     await dispatcher.storage.wait_closed()
-
-
-async def send_message(message: str):
-    await bot.send_message(146076472, message)
 
 
 if __name__ == '__main__':
