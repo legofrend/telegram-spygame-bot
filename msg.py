@@ -37,8 +37,7 @@ MSG = {
         'msg_choose_set_name': 'Выберите набор?',
         'spy_role': 'шпион',
         'msg_create_game': 'Cоздал игру: `{game_name}`',
-        'msg_you_join_game': 'Вы присоединились к игре {game_name}, дождитесь старта раунда. \
-                Посмотреть кто в игре можно командой /game',
+        'msg_you_join_game': 'Вы присоединились к игре {game_name}, дождитесь старта раунда.',
         'msg_you_quit_game': 'Вы вышли из игры',
         'msg_round': 'Раунд',
         'msg_your_location_role': 'Место: {loc_name}\nВы: {role}',

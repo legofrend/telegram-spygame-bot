@@ -302,7 +302,7 @@ async def parse_command(message: types.Message, state: FSMContext):
     # looking for command among button captions
     cmd = kb.text2cmd(message.text)
     if cmd == 'join':
-        return await cmd2fnc[cmd](message, state)
+        return await cmd2fnc[cmd](message)  # , state
     elif cmd:
         return await cmd2fnc[cmd](message)
 
