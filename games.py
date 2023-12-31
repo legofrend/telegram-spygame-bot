@@ -221,7 +221,10 @@ class Game():
         """Get info about game: players with scores, current round"""
         spls = {k: v for k, v in sorted(self.scores.items(), key=lambda item: item[1], reverse=True)}
 
-        result = list((self.players[k].full_name, v) for (k, v) in spls.items())
+        result = []
+        for (k, v) in spls.items():
+            if k in self.players.keys():
+                result.append((self.players[k].full_name, v))
         return result
 
     def get_locations(self) -> tuple:
@@ -422,9 +425,10 @@ class Player():
         if self.nps:
             return self.nps
 
-        l = db.fetchall('nps', 'nps datetime_stamp'.split(), {'id': id})[0]
+        l = db.fetchall('nps', 'nps datetime_stamp'.split(), {'id': id})
         if not l:
             return
+        l = l[0]
         if not is_recent or l['datetime_stamp'] >= (_get_now_datetime() - dt.timedelta(days=360)):
             self.nps = l['nps']
         return self.nps

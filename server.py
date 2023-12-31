@@ -76,6 +76,7 @@ async def join_game(message: types.Message):
 
     answer_message = pl.join_game(game_name)
     await message.answer(answer_message, reply_markup=pl.kb)
+    await bot.send_message(pl.game.admin.id, _msg('msg_pl_join_your_game', pl).format(pl=pl))
 
 
 @dp.message_handler(state=FSMUser.wait_name)
@@ -95,6 +96,8 @@ async def quit_game(message: types.Message):
     round_nbr = pl.game.round_nbr
     answer_message = pl.quit_game()
     await message.answer(answer_message, reply_markup=pl.kb)
+    if not pl.is_admin:
+        await bot.send_message(pl.game.admin.id, _msg('msg_pl_left_your_game', pl).format(pl=pl))
 
     if round_nbr > 5 and not pl.get_nps():
         await message.answer(pl.msg('msg_ask_nps_score'), reply_markup=kb.nps)
